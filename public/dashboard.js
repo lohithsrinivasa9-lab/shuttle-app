@@ -1,14 +1,20 @@
 // Shared dashboard for front desk + driver (no login, no role split).
 const app = document.getElementById("app");
 const DEST_LABEL = { AIRPORT: "Airport", STADIUM: "Stadium", FERRY: "Ferry", TRAIN: "Train" };
+const DEST_LABEL_FULL = { AIRPORT: "Airport", STADIUM: "Stadium", FERRY: "Ferry Terminal", TRAIN: "Train Station" };
 const MORNING_TIMES = ["07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00"];
 const EVENING_TIMES = ["16:00", "17:00", "18:00", "19:00", "20:00", "21:00"];
 
 let currentTab = "today";
-let todayInfo = null; // { today, previousDay, upcomingMax, historyMin }
+let todayInfo = null; // { today, previousDay, upcomingMax, historyMin, emailConfigured }
 let config = {};
 let pickerDate = { upcoming: null, history: null };
 let selected = new Set();
+let showAllSlots = false;
+
+// Snapshot of the currently-rendered day view, kept so the bulk bar can re-render itself
+// (e.g. when the "show all slots" toggle flips) without refetching from the server.
+let currentView = { date: null, slots: [], bookings: [] };
 
 function banner(msg, isError) {
   document.getElementById("banner").innerHTML = msg
@@ -37,6 +43,10 @@ function niceDate(dateStr) {
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
 }
 
+function roomsText(b) {
+  return (b.roomNumbers && b.roomNumbers.length) ? b.roomNumbers.join(", ") : "—";
+}
+
 async function init() {
   const [t, c] = await Promise.all([api("GET", "/api/admin/today"), api("GET", "/api/admin/config")]);
   todayInfo = t;
@@ -44,8 +54,20 @@ async function init() {
   pickerDate.upcoming = addDaysStr(todayInfo.today, 1);
   pickerDate.history = addDaysStr(todayInfo.previousDay, -1);
 
+  if (!todayInfo.emailConfigured) {
+    document.getElementById("mail-warning").innerHTML = `
+      <div class="banner error">
+        Email sending isn't configured yet (no Gmail credentials set) - guests will NOT receive
+        emails until <code>GMAIL_USER</code> and <code>GMAIL_APP_PASSWORD</code> are added in your
+        host's environment variables. Assignments/approvals still work, they just won't notify guests.
+      </div>`;
+  }
+
   document.querySelectorAll(".tabbtn").forEach((btn) => {
     btn.addEventListener("click", () => setTab(btn.dataset.tab));
+  });
+  document.getElementById("guest-modal-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "guest-modal-overlay") closeGuestModal();
   });
   setTab("today");
 
@@ -69,6 +91,7 @@ function addDaysStr(dateStr, n) {
 function setTab(tab) {
   currentTab = tab;
   selected = new Set();
+  showAllSlots = false;
   document.querySelectorAll(".tabbtn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   render();
 }
@@ -94,6 +117,7 @@ async function renderDayView(info) {
   ]);
   const slots = slotsRes.slots;
   const bookings = bookingsRes.bookings;
+  currentView = { date: info.date, slots, bookings };
   const byTime = Object.fromEntries(slots.map((s) => [s.time, s]));
 
   app.innerHTML = `
@@ -136,14 +160,16 @@ async function renderDayView(info) {
 
   bookings.forEach((b) => {
     const cb = document.getElementById(`chk-${b._id}`);
-    if (cb) cb.addEventListener("change", () => { cb.checked ? selected.add(b._id) : selected.delete(b._id); renderBulkBar(info.date, slots); });
+    if (cb) cb.addEventListener("change", () => { cb.checked ? selected.add(b._id) : selected.delete(b._id); renderBulkBar(); });
+    const nameBtn = document.getElementById(`name-${b._id}`);
+    if (nameBtn) nameBtn.addEventListener("click", () => openGuestModal(b));
     const approveBtn = document.getElementById(`approve-${b._id}`);
-    if (approveBtn) approveBtn.addEventListener("click", () => approveChange(b._id, info));
+    if (approveBtn) approveBtn.addEventListener("click", () => approveChange(b._id));
     const rejectBtn = document.getElementById(`reject-${b._id}`);
-    if (rejectBtn) rejectBtn.addEventListener("click", () => rejectChange(b._id, info));
+    if (rejectBtn) rejectBtn.addEventListener("click", () => rejectChange(b._id));
   });
 
-  renderBulkBar(info.date, slots);
+  renderBulkBar();
 }
 
 function slotCard(s) {
@@ -157,16 +183,16 @@ function slotCard(s) {
 
 function requestRow(b) {
   const isChange = b.status === "CHANGE_REQUESTED";
-  return `<div class="card ${isChange ? "" : ""}">
+  return `<div class="card">
     <div class="req-row">
       <input type="checkbox" id="chk-${b._id}" ${selected.has(b._id) ? "checked" : ""} />
       <div class="req-body">
         <div class="row">
-          <b>${b.name}</b>
+          <button class="guest-link" id="name-${b._id}" type="button">${b.name}</button>
           <span class="pill ${b.status}">${b.status.replace("_", " ")}</span>
         </div>
         <p class="muted" style="margin:2px 0;">
-          Room ${b.roomNumber} · ${b.partySize} guest(s) · ${DEST_LABEL[b.destination] || b.destination} ·
+          Room ${roomsText(b)} · ${b.partySize} guest(s) · ${DEST_LABEL[b.destination] || b.destination} ·
           ${b.direction === "DROPOFF" ? "Out" : "Return"} · requested ${fmtTimestamp(b.createdAt)}
         </p>
         <p style="margin:2px 0;">
@@ -189,48 +215,126 @@ function requestRow(b) {
   </div>`;
 }
 
-function renderBulkBar(date, slots) {
+// --- Guest detail modal ---
+function openGuestModal(b) {
+  const overlay = document.getElementById("guest-modal-overlay");
+  const box = document.getElementById("guest-modal-box");
+  box.innerHTML = `
+    <button class="btn secondary small modal-close" id="modal-close-btn">Close</button>
+    <h2>${b.name}</h2>
+    <div class="field"><b>Status</b><span class="pill ${b.status}">${b.status.replace("_", " ")}</span></div>
+    <div class="field"><b>Room(s)</b>${roomsText(b)}</div>
+    <div class="field"><b>Party size</b>${b.partySize} guest(s)</div>
+    <div class="field"><b>Email</b><a href="mailto:${b.email}">${b.email}</a></div>
+    <div class="field"><b>Phone</b><a href="tel:${b.phone}">${b.phone}</a></div>
+    <div class="field"><b>Destination</b>${DEST_LABEL_FULL[b.destination] || b.destination} (${b.direction === "DROPOFF" ? "Hotel → Destination" : "Destination → Hotel"})</div>
+    <div class="field"><b>Travel date</b>${b.date}</div>
+    <div class="field"><b>Preferred times</b>${b.preferredSlotLabels.join(", ")}</div>
+    <div class="field"><b>Assigned time</b>${b.assignedSlotLabel || "Not yet assigned"}</div>
+    ${b.requestedSlotLabel ? `<div class="field"><b>Requested change to</b>${b.requestedSlotLabel}</div>` : ""}
+    <div class="field"><b>Requested</b>${fmtTimestamp(b.createdAt)}</div>
+    ${b.allocationEmailSentAt ? `<div class="field"><b>Confirmation emailed</b>${fmtTimestamp(b.allocationEmailSentAt)}</div>` : ""}
+  `;
+  overlay.classList.remove("hidden");
+  document.getElementById("modal-close-btn").addEventListener("click", closeGuestModal);
+}
+
+function closeGuestModal() {
+  document.getElementById("guest-modal-overlay").classList.add("hidden");
+}
+
+// --- Bulk regroup bar ---
+// By default, only shows slots that ALL selected guests actually listed as a preference
+// (the intersection), so front desk can't accidentally park someone at a time they never
+// wanted. "Show all slots" opts out of that restriction for edge cases (e.g. Needs Review).
+function candidateSlotTimes() {
+  const chosen = currentView.bookings.filter((b) => selected.has(b._id));
+  const blockedTimes = new Set(currentView.slots.filter((s) => s.blocked).map((s) => s.time));
+  const order = currentView.slots.map((s) => s.time);
+
+  if (showAllSlots) return order.filter((t) => !blockedTimes.has(t));
+  if (chosen.length === 0) return [];
+
+  let common = new Set(chosen[0].preferredSlots);
+  for (let i = 1; i < chosen.length; i++) {
+    const s = new Set(chosen[i].preferredSlots);
+    common = new Set([...common].filter((t) => s.has(t)));
+  }
+  return order.filter((t) => common.has(t) && !blockedTimes.has(t));
+}
+
+function renderBulkBar() {
   const wrap = document.getElementById("bulkbar-slot");
   if (!wrap) return;
   if (selected.size === 0) { wrap.innerHTML = ""; return; }
+
+  const byTime = Object.fromEntries(currentView.slots.map((s) => [s.time, s]));
+  const candidates = candidateSlotTimes();
+  const toggle = `
+    <label>
+      <input type="checkbox" id="show-all-toggle" ${showAllSlots ? "checked" : ""} />
+      Show all slots (override preference)
+    </label>`;
+
+  if (candidates.length === 0) {
+    wrap.innerHTML = `
+      <div class="bulkbar">
+        <span><b>${selected.size}</b> selected</span>
+        <span class="muted">No preferred time is common to everyone selected${selected.size > 1 ? " - they don't share an overlapping choice" : ""}.</span>
+        ${toggle}
+      </div>`;
+    document.getElementById("show-all-toggle").addEventListener("change", (e) => { showAllSlots = e.target.checked; renderBulkBar(); });
+    return;
+  }
+
   wrap.innerHTML = `
     <div class="bulkbar">
       <span><b>${selected.size}</b> selected</span>
       <select id="bulk-slot-select">
-        ${slots.map((s) => `<option value="${s.time}">${s.label}${s.blocked ? " (blocked)" : ` - ${s.used}/${s.max}`}</option>`).join("")}
+        ${candidates.map((t) => {
+          const s = byTime[t];
+          return `<option value="${t}">${s.label} - ${s.used}/${s.max}</option>`;
+        }).join("")}
       </select>
       <button class="btn small" id="bulk-assign-email">Assign &amp; Email</button>
       <button class="btn small secondary" id="bulk-assign-silent">Assign only</button>
-      <span class="muted">Regroups selected requests into one time slot.</span>
+      ${toggle}
     </div>`;
-  document.getElementById("bulk-assign-email").addEventListener("click", () => bulkAssign(date, true));
-  document.getElementById("bulk-assign-silent").addEventListener("click", () => bulkAssign(date, false));
+  document.getElementById("bulk-assign-email").addEventListener("click", () => bulkAssign(true));
+  document.getElementById("bulk-assign-silent").addEventListener("click", () => bulkAssign(false));
+  document.getElementById("show-all-toggle").addEventListener("change", (e) => { showAllSlots = e.target.checked; renderBulkBar(); });
 }
 
-async function bulkAssign(date, sendEmail) {
+async function bulkAssign(sendEmail) {
   const slotTime = document.getElementById("bulk-slot-select").value;
   try {
     const res = await api("POST", "/api/admin/bookings/bulk-assign", { ids: [...selected], slotTime, sendEmail });
-    banner(`Moved ${res.updated} request(s) to ${slotTime}.${sendEmail ? ` Emailed ${res.emailed}.` : ""}`);
+    let msg = `Moved ${res.updated} request(s) to ${slotTime}.`;
+    if (sendEmail) {
+      msg += ` Emailed ${res.emailed}.`;
+      if (res.emailSkipped) msg += ` ${res.emailSkipped} email(s) were NOT sent - Gmail isn't configured yet.`;
+    }
+    banner(msg, sendEmail && res.emailSkipped > 0);
     selected = new Set();
+    showAllSlots = false;
     render();
   } catch (e) {
     banner(e.message, true);
   }
 }
 
-async function approveChange(id, info) {
+async function approveChange(id) {
   try {
-    await api("POST", `/api/admin/bookings/${id}/approve-change`);
-    banner("Change approved and guest notified.");
+    const res = await api("POST", `/api/admin/bookings/${id}/approve-change`);
+    banner(res.emailSkipped ? "Change approved, but the email was NOT sent - Gmail isn't configured yet." : "Change approved and guest notified.", Boolean(res.emailSkipped));
     render();
   } catch (e) { banner(e.message, true); }
 }
 
-async function rejectChange(id, info) {
+async function rejectChange(id) {
   try {
-    await api("POST", `/api/admin/bookings/${id}/reject-change`);
-    banner("Change rejected - guest kept their original time and was notified.");
+    const res = await api("POST", `/api/admin/bookings/${id}/reject-change`);
+    banner(res.emailSkipped ? "Change rejected, but the email was NOT sent - Gmail isn't configured yet." : "Change rejected - guest kept their original time and was notified.", Boolean(res.emailSkipped));
     render();
   } catch (e) { banner(e.message, true); }
 }

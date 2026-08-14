@@ -10,6 +10,39 @@ dateInput.max = toLocalDateStr(fourMonthsOut);
 let selectedSlots = []; // ordered array of slot times, preference order
 let slotsData = [];
 
+// --- Room number(s) ---
+const roomListEl = document.getElementById("room-list");
+
+function renderRoomInputs() {
+  const count = roomListEl.querySelectorAll(".room-row").length;
+  if (count === 0) addRoomRow();
+}
+
+function addRoomRow() {
+  const row = document.createElement("div");
+  row.className = "room-row";
+  row.style.display = "flex";
+  row.style.gap = "8px";
+  row.style.marginTop = "6px";
+  row.innerHTML = `
+    <input type="text" class="room-input" placeholder="Room number" required style="flex:1;" />
+    <button type="button" class="btn secondary small remove-room-btn" style="flex:0;">Remove</button>
+  `;
+  roomListEl.appendChild(row);
+  row.querySelector(".remove-room-btn").addEventListener("click", () => {
+    if (roomListEl.querySelectorAll(".room-row").length > 1) row.remove();
+  });
+}
+
+document.getElementById("add-room-btn").addEventListener("click", addRoomRow);
+renderRoomInputs();
+
+function getRoomNumbers() {
+  return [...roomListEl.querySelectorAll(".room-input")]
+    .map((el) => el.value.trim())
+    .filter(Boolean);
+}
+
 function banner(msg, isError) {
   document.getElementById("banner").innerHTML = msg
     ? `<div class="banner ${isError ? "error" : ""}">${msg}</div>`
@@ -71,9 +104,15 @@ document.getElementById("booking-form").addEventListener("submit", async (e) => 
     return;
   }
 
+  const roomNumbers = getRoomNumbers();
+  if (roomNumbers.length === 0) {
+    banner("Please enter at least one room number.", true);
+    return;
+  }
+
   const payload = {
     name: document.getElementById("name").value.trim(),
-    roomNumber: document.getElementById("roomNumber").value.trim(),
+    roomNumbers,
     partySize: Number(document.getElementById("partySize").value),
     email: document.getElementById("email").value.trim(),
     phone: document.getElementById("phone").value.trim(),

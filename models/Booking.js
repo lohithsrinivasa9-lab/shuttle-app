@@ -19,7 +19,15 @@ const bookingSchema = new mongoose.Schema(
     partySize: { type: Number, required: true, min: 1, max: 20 },
     email: { type: String, required: true, trim: true, lowercase: true },
     phone: { type: String, required: true, trim: true },
-    roomNumber: { type: String, required: true, trim: true },
+    roomNumbers: {
+      type: [String], // one guest booking can cover multiple rooms traveling together
+      required: true,
+      validate: {
+        validator: (arr) => Array.isArray(arr) && arr.length >= 1 && arr.every((r) => String(r).trim().length > 0),
+        message: "Enter at least one room number"
+      },
+      set: (arr) => (Array.isArray(arr) ? arr.map((r) => String(r).trim()).filter(Boolean) : arr)
+    },
 
     destination: { type: String, required: true, enum: DESTINATIONS },
     direction: { type: String, required: true, enum: DIRECTIONS },

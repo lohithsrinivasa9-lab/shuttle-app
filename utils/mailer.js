@@ -43,16 +43,25 @@ async function sendMail({ to, subject, html, fromName }) {
   });
 }
 
+// Placeholder logo - swap /public/email-assets/logo.png for the real hotel logo whenever it's
+// ready (same filename, same square-ish aspect ratio works best). Served as a normal static
+// file, so it just needs to be reachable at BASE_URL/email-assets/logo.png.
 function wrap(hotelName, bodyHtml, { phone, email }) {
+  const baseUrl = process.env.BASE_URL || "http://localhost:3000";
+  const logoUrl = `${baseUrl}/email-assets/logo.png`;
   return `
-  <div style="font-family: -apple-system, Arial, sans-serif; max-width: 480px; margin: 0 auto; color:#1a1a1a;">
-    <h2 style="color:#0b5fa5; margin-bottom:4px;">${hotelName}</h2>
-    <p style="color:#888; font-size:13px; margin-top:0;">Shuttle Service</p>
-    ${bodyHtml}
-    <p style="margin-top:26px; padding-top:16px; border-top:1px solid #eee; font-size:13px; color:#666;">
+  <div style="font-family: -apple-system, Arial, sans-serif; max-width: 480px; margin: 0 auto; color:#1a1a1a; text-align:center;">
+    <img src="${logoUrl}" alt="${hotelName}" width="84" height="84" style="display:block; margin:0 auto 10px;" />
+    <h1 style="color:#0b5fa5; margin:0 0 2px; font-size:23px;">${hotelName}</h1>
+    <p style="color:#b8860b; font-size:12px; letter-spacing:1.5px; text-transform:uppercase; margin:0 0 14px; font-weight:700;">Shuttle Service</p>
+    <div style="height:3px; background:linear-gradient(90deg,#d4a529,#f0d16a,#d4a529); margin:0 0 22px; border-radius:2px;"></div>
+    <div style="text-align:left;">
+      ${bodyHtml}
+    </div>
+    <p style="margin-top:26px; padding-top:16px; border-top:1px solid #eee; font-size:13px; color:#666; text-align:left;">
       Questions? Call the front desk at <b>${phone}</b>${email ? ` or email <a href="mailto:${email}" style="color:#0b5fa5;">${email}</a>` : ""}.
     </p>
-    <p style="font-size:13px; color:#666;">Safe travels! 🚐</p>
+    <p style="font-size:13px; color:#666; text-align:left;">Safe travels! 🚐</p>
   </div>`;
 }
 
@@ -68,12 +77,17 @@ function directionLine(booking) {
   return booking.direction === "DROPOFF" ? `Hotel &rarr; ${dest}` : `${dest} &rarr; Hotel`;
 }
 
+function roomLine(booking) {
+  const rooms = booking.roomNumbers && booking.roomNumbers.length ? booking.roomNumbers.join(", ") : null;
+  return rooms ? ` (Room${booking.roomNumbers.length > 1 ? "s" : ""} ${rooms})` : "";
+}
+
 async function sendBookingReceived(booking) {
   const brand = await getBrand();
   const html = wrap(brand.hotelName, `
     <p>Hi ${booking.name},</p>
     <p>We've received your shuttle request for <b>${directionLine(booking)}</b>
-    on <b>${booking.date}</b> for <b>${booking.partySize}</b> guest(s).</p>
+    on <b>${booking.date}</b> for <b>${booking.partySize}</b> guest(s)${roomLine(booking)}.</p>
     <p>Your preferred times: ${booking.preferredSlots.map(formatSlotLabel).join(", ")}.</p>
     <p>We group guests by demand to run as few shuttle trips as possible, so we'll confirm your
     exact time slot shortly by email. Thanks for your patience!</p>
@@ -87,17 +101,17 @@ async function sendAllocationEmail(booking) {
   const link = `${baseUrl}/respond.html?token=${booking.respondToken}`;
   const html = wrap(brand.hotelName, `
     <p>Hi ${booking.name},</p>
-    <p>Your shuttle for <b>${directionLine(booking)}</b> on <b>${booking.date}</b> (${booking.partySize} guest(s))
+    <p>Your shuttle for <b>${directionLine(booking)}</b> on <b>${booking.date}</b> (${booking.partySize} guest(s)${roomLine(booking)})
     is scheduled for:</p>
     ${timeWedge(booking.assignedSlot)}
     <p>Please be in the lobby at least <b>15 minutes before</b> your departure time.</p>
-    <p>Let us know if this works for you:</p>
-    <p>
-      <a href="${link}" style="display:inline-block; padding:10px 18px; background:#0b5fa5; color:#fff; text-decoration:none; border-radius:6px;">
-        Review &amp; respond
+    <p>Need a different time, or just want to confirm this one works?</p>
+    <p style="text-align:center; margin:22px 0;">
+      <a href="${link}" style="display:inline-block; width:100%; max-width:320px; box-sizing:border-box; padding:14px 18px; background:#0b5fa5; color:#fff; text-decoration:none; border-radius:8px; font-weight:700; font-size:16px; text-align:center;">
+        Request Changes
       </a>
     </p>
-    <p style="font-size:13px; color:#666;">You can accept, reject, or request a different time from that page.</p>
+    <p style="font-size:13px; color:#666;">That page also lets you accept or reject this time directly.</p>
   `, brand);
   return sendMail({ to: booking.email, subject: `Your shuttle time is scheduled - ${formatSlotLabel(booking.assignedSlot)}`, html, fromName: brand.hotelName });
 }

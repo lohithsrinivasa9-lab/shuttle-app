@@ -20,7 +20,9 @@ router.get("/today", (req, res) => {
     today,
     previousDay: addDays(today, -1),
     upcomingMax: addMonths(today, 4),
-    historyMin: addMonths(today, -4)
+    historyMin: addMonths(today, -4),
+    // Lets the dashboard warn staff up front if emails will silently not send.
+    emailConfigured: Boolean(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD)
   });
 });
 
@@ -74,6 +76,7 @@ router.post("/bookings/bulk-assign", async (req, res) => {
 
     let updated = 0;
     let emailed = 0;
+    let emailSkipped = 0;
     for (const id of ids) {
       const booking = await Booking.findById(id);
       if (!booking) continue;
@@ -85,13 +88,17 @@ router.post("/bookings/bulk-assign", async (req, res) => {
       await booking.save();
       updated++;
       if (sendEmail) {
-        await sendAllocationEmail(booking);
-        booking.allocationEmailSentAt = new Date();
-        await booking.save();
-        emailed++;
+        const result = await sendAllocationEmail(booking);
+        if (result && result.skipped) {
+          emailSkipped++;
+        } else {
+          booking.allocationEmailSentAt = new Date();
+          await booking.save();
+          emailed++;
+        }
       }
     }
-    res.json({ ok: true, updated, emailed });
+    res.json({ ok: true, updated, emailed, emailSkipped });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -108,8 +115,11 @@ router.post("/bookings/:id/approve-change", async (req, res) => {
     booking.requestedSlot = null;
     booking.status = "CONFIRMED";
     await booking.save();
-    sendChangeConfirmed(booking).catch((e) => console.error("email error:", e.message));
-    res.json({ ok: true, booking });
+    const mailResult = await sendChangeConfirmed(booking).catch((e) => {
+      console.error("email error:", e.message);
+      return { skipped: true, error: e.message };
+    });
+    res.json({ ok: true, booking, emailSkipped: Boolean(mailResult?.skipped) });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -124,10 +134,14 @@ router.post("/bookings/:id/reject-change", async (req, res) => {
     booking.requestedSlot = null;
     booking.status = booking.assignedSlot ? "CONFIRMED" : "NEEDS_REVIEW";
     await booking.save();
+    let mailResult = null;
     if (booking.assignedSlot) {
-      sendChangeRejected(booking).catch((e) => console.error("email error:", e.message));
+      mailResult = await sendChangeRejected(booking).catch((e) => {
+        console.error("email error:", e.message);
+        return { skipped: true, error: e.message };
+      });
     }
-    res.json({ ok: true, booking });
+    res.json({ ok: true, booking, emailSkipped: Boolean(mailResult?.skipped) });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -200,13 +214,18 @@ router.post("/send-emails", async (req, res) => {
     });
 
     let sent = 0;
+    let emailSkipped = 0;
     for (const booking of toEmail) {
-      await sendAllocationEmail(booking);
-      booking.allocationEmailSentAt = new Date();
-      await booking.save();
-      sent++;
+      const result = await sendAllocationEmail(booking);
+      if (result && result.skipped) {
+        emailSkipped++;
+      } else {
+        booking.allocationEmailSentAt = new Date();
+        await booking.save();
+        sent++;
+      }
     }
-    res.json({ ok: true, sent });
+    res.json({ ok: true, sent, emailSkipped });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

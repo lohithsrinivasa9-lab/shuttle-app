@@ -115,3 +115,21 @@ th { background: #f0f3f7; }
 }
 .bulkbar select { width: auto; }
 .bulkbar .muted { color: #b7c3d1; }
+.bulkbar label { color: #fff; margin: 0; font-weight: 500; display: flex; align-items: center; gap: 6px; }
+.bulkbar input[type="checkbox"] { width: auto; }
+
+.guest-link { background: none; border: none; padding: 0; font: inherit; font-weight: 700; color: #0b5fa5; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(10, 20, 35, 0.55);
+  display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px;
+}
+.modal-overlay.hidden { display: none; }
+.modal-box {
+  background: #fff; border-radius: 12px; padding: 22px 24px; max-width: 440px; width: 100%;
+  max-height: 85vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.25);
+}
+.modal-box h2 { margin-top: 0; }
+.modal-box .field { margin: 10px 0; font-size: 14px; }
+.modal-box .field b { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: #888; font-weight: 700; margin-bottom: 2px; }
+.modal-close { float: right; }

@@ -29,10 +29,12 @@ router.get("/slots", async (req, res) => {
 // Guest submits the booking form (from the QR-code page).
 router.post("/", async (req, res) => {
   try {
-    const { name, partySize, email, phone, roomNumber, destination, direction, date, preferredSlots } = req.body;
+    const { name, partySize, email, phone, roomNumbers, destination, direction, date, preferredSlots } = req.body;
 
-    if (!name || !partySize || !email || !phone || !roomNumber || !destination || !direction || !date || !preferredSlots) {
-      return res.status(400).json({ error: "All fields are required." });
+    const cleanRooms = Array.isArray(roomNumbers) ? roomNumbers.map((r) => String(r).trim()).filter(Boolean) : [];
+
+    if (!name || !partySize || !email || !phone || cleanRooms.length === 0 || !destination || !direction || !date || !preferredSlots) {
+      return res.status(400).json({ error: "All fields are required (including at least one room number)." });
     }
     if (!Array.isArray(preferredSlots) || preferredSlots.length < 2 || preferredSlots.length > 3) {
       return res.status(400).json({ error: "Choose 2 or 3 preferred time slots." });
@@ -41,7 +43,7 @@ router.post("/", async (req, res) => {
     if (invalidSlot) return res.status(400).json({ error: `Invalid time slot: ${invalidSlot}` });
 
     const booking = await Booking.create({
-      name, partySize, email, phone, roomNumber, destination, direction, date, preferredSlots
+      name, partySize, email, phone, roomNumbers: cleanRooms, destination, direction, date, preferredSlots
     });
 
     sendBookingReceived(booking).catch((e) => console.error("email error:", e.message));
