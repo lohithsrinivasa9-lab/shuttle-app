@@ -58,6 +58,21 @@ const bookingSchema = new mongoose.Schema(
 
 bookingSchema.index({ date: 1, assignedSlot: 1, status: 1 });
 
+// Backfill guard: bookings created before multi-room support was added don't have a valid
+// roomNumbers array. Mongoose re-validates the WHOLE document on every save (not just changed
+// fields), so without this, any unrelated staff action on an old booking - approve, reject,
+// bulk-assign, manual edit - would fail with "roomNumbers: Enter at least one room number" even
+// though nothing about rooms was touched. This recovers the legacy single `roomNumber` value if
+// present, or falls back to a placeholder, so old bookings stay editable.
+bookingSchema.pre("validate", function (next) {
+  const hasValidRooms = Array.isArray(this.roomNumbers) && this.roomNumbers.some((r) => String(r).trim());
+  if (!hasValidRooms) {
+    const legacy = this.get("roomNumber");
+    this.roomNumbers = legacy ? [String(legacy).trim()] : ["Not provided"];
+  }
+  next();
+});
+
 module.exports = mongoose.model("Booking", bookingSchema);
 module.exports.DESTINATIONS = DESTINATIONS;
 module.exports.DIRECTIONS = DIRECTIONS;

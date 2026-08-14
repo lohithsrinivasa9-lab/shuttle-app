@@ -1,14 +1,14 @@
 # Shuttle App Test Results
 
-Run at: 2026-08-14T02:19:25.812Z
+Run at: 2026-08-14T02:46:05.334Z
 Result: **46/46 passed**
 
-**What's new in this run:** multi-room-number bookings, honest email-skipped reporting (bulk
-regroup / approve-change / reject-change no longer mark an email as "sent" when Gmail isn't
-configured), and the redesigned guest email (logo, gold divider, bigger time display, "Request
-Changes" button, room numbers). The bulk-regroup slot dropdown restricting itself to guests'
-shared preferred times, and the guest-detail popup, are dashboard-only (client-side) features not
-exercised by this API-level test suite - verified by code review and manual QA instead.
+**Also fixed and separately verified (legacy_test.js, 2/2 passed):** bookings created before
+the multi-room-number migration don't have a valid `roomNumbers` array, and Mongoose re-validates
+the whole document on every save - so any unrelated staff action (approve, reject, bulk-assign,
+manual edit) on an old booking was failing with `roomNumbers: Enter at least one room number`.
+Added a pre-validate hook on the Booking model that recovers the legacy `roomNumber` string field
+if present, or falls back to `["Not provided"]`, so old bookings stay editable.
 
 | # | Test | Result | Detail |
 |---|------|--------|--------|
@@ -34,8 +34,8 @@ exercised by this API-level test suite - verified by code review and manual QA i
 | 20 | POST /api/bookings creates oversized B7 Ferry Overflow | PASS | status=201 |
 | 21 | POST /api/admin/allocate flags unfittable booking as NEEDS_REVIEW | PASS | {"allocated":0,"needsReview":1,"message":"Allocated 0 booking(s). 1 need manual review."} |
 | 22 | PATCH /api/admin/bookings manually assigns B7 to 13:00 | PASS | "ALLOCATED" |
-| 23 | PATCH /api/admin/config saves phone number | PASS | {"key":"singleton","frontdeskPhone":"+1 (555) 111-2222","hotelName":"Our Hotel","frontdeskEmail":"","_id":"e6f21e9434de39a95b73c9be"} |
-| 24 | GET /api/admin/config returns saved phone number | PASS | {"key":"singleton","frontdeskPhone":"+1 (555) 111-2222","hotelName":"Our Hotel","frontdeskEmail":"","_id":"e6f21e9434de39a95b73c9be"} |
+| 23 | PATCH /api/admin/config saves phone number | PASS | {"key":"singleton","frontdeskPhone":"+1 (555) 111-2222","hotelName":"Our Hotel","frontdeskEmail":"","_id":"c8edbabc7303ec7e92a2a967"} |
+| 24 | GET /api/admin/config returns saved phone number | PASS | {"key":"singleton","frontdeskPhone":"+1 (555) 111-2222","hotelName":"Our Hotel","frontdeskEmail":"","_id":"c8edbabc7303ec7e92a2a967"} |
 | 25 | GET /api/admin/qrcode returns a PNG image | PASS | status=200 type=image/png bytes=2518 |
 | 26 | POST /api/admin/slots/block can unblock 12:00 again | PASS | blocked=false |
 | 27 | GET /api/respond/:token shows B2's assigned slot | PASS | {"name":"B2 Stadium","destination":"STADIUM","direction":"DROPOFF","date":"2026-08-20","partySize":8,"assignedSlot":"09:00","assignedSlotLabel":"9:00 AM","requestedSlot":null,"requestedSlotLabel":null,"status":"ALLOCATED"} |
@@ -46,8 +46,8 @@ exercised by this API-level test suite - verified by code review and manual QA i
 | 32 | GET alternatives excludes slots held by a different destination group | PASS | alternatives=08:00,09:00,11:00,12:00,17:00,18:00,19:00,20:00,21:00 |
 | 33 | POST /api/respond change with valid newSlot -> CHANGE_REQUESTED (pending front desk approval) | PASS | {"ok":true,"status":"CHANGE_REQUESTED","requestedSlot":"09:00","pendingApproval":true} |
 | 34 | GET /api/respond/:token shows pending change with original slot untouched | PASS | {"name":"B1 Stadium","destination":"STADIUM","direction":"DROPOFF","date":"2026-08-20","partySize":5,"assignedSlot":"10:00","assignedSlotLabel":"10:00 AM","requestedSlot":"09:00","requestedSlotLabel":"9:00 AM","status":"CHANGE_REQUESTED"} |
-| 35 | POST /api/admin/bookings/:id/approve-change moves B1 to 09:00 and confirms | PASS | {"name":"B1 Stadium","partySize":5,"email":"b1stadium@test.com","phone":"555-0000","roomNumbers":["101"],"destination":"STADIUM","direction":"DROPOFF","date":"2026-08-20","preferredSlots":["09:00","10:00"],"status":"CONFIRMED","assignedSlot":"09:00","requestedSlot":null,"reviewNote":"","respondToken":"af7c2a35deb3b70421a40167a6fbefbcbb52d547","allocationEmailSentAt":null,"_id":"f21fd02b7c406ca3c9e429b4","createdAt":"2026-08-14T02:19:25.669Z","updatedAt":"2026-08-14T02:19:25.739Z"} |
-| 36 | POST /api/admin/bookings/:id/reject-change reverts B4 to its original slot (13:00) and re-confirms | PASS | {"name":"B4 Ferry","partySize":6,"email":"b4ferry@test.com","phone":"555-0001","roomNumbers":["102"],"destination":"FERRY","direction":"DROPOFF","date":"2026-08-20","preferredSlots":["09:00","13:00"],"status":"CONFIRMED","assignedSlot":"13:00","requestedSlot":null,"reviewNote":"","respondToken":"eb961850d7a80cb364de0d938021481bd995ed81","allocationEmailSentAt":null,"_id":"010974d29137148ba2b4b23b","createdAt":"2026-08-14T02:19:25.676Z","updatedAt":"2026-08-14T02:19:25.742Z"} |
+| 35 | POST /api/admin/bookings/:id/approve-change moves B1 to 09:00 and confirms | PASS | {"name":"B1 Stadium","partySize":5,"email":"b1stadium@test.com","phone":"555-0000","roomNumbers":["101"],"destination":"STADIUM","direction":"DROPOFF","date":"2026-08-20","preferredSlots":["09:00","10:00"],"status":"CONFIRMED","assignedSlot":"09:00","requestedSlot":null,"reviewNote":"","respondToken":"5af33fad9bd2bac886665f956230e252f25ee131","allocationEmailSentAt":null,"_id":"2115a6883563851a09b4c8bc","createdAt":"2026-08-14T02:46:05.188Z","updatedAt":"2026-08-14T02:46:05.255Z"} |
+| 36 | POST /api/admin/bookings/:id/reject-change reverts B4 to its original slot (13:00) and re-confirms | PASS | {"name":"B4 Ferry","partySize":6,"email":"b4ferry@test.com","phone":"555-0001","roomNumbers":["102"],"destination":"FERRY","direction":"DROPOFF","date":"2026-08-20","preferredSlots":["09:00","13:00"],"status":"CONFIRMED","assignedSlot":"13:00","requestedSlot":null,"reviewNote":"","respondToken":"b6849b6e8ebd41a865cb48f4fe6f0d0518e2d40d","allocationEmailSentAt":null,"_id":"b8ef5b34f28f8e02446b6fc8","createdAt":"2026-08-14T02:46:05.194Z","updatedAt":"2026-08-14T02:46:05.258Z"} |
 | 37 | POST /api/admin/bookings/bulk-assign regroups B5+B6 into 08:00 and honestly reports emails as skipped (no Gmail creds here) | PASS | {"ok":true,"updated":2,"emailed":0,"emailSkipped":2} |
 | 38 | Bulk-assigned bookings now both show assignedSlot 08:00 | PASS | B5=08:00 B6=08:00 |
 | 39 | GET /api/admin/today returns operational date + upcoming/history bounds | PASS | {"today":"2026-08-13","previousDay":"2026-08-12","upcomingMax":"2026-12-13","historyMin":"2026-04-13","emailConfigured":false} |
@@ -56,5 +56,5 @@ exercised by this API-level test suite - verified by code review and manual QA i
 | 42 | POST /api/respond with unknown action -> 400 | PASS | status=400 |
 | 43 | POST /api/respond change into a cross-group slot -> 409 | PASS | {"error":"That slot just filled up. Please pick another."} |
 | 44 | POST /api/admin/allocate with no pending bookings reports 0/0 | PASS | {"allocated":0,"needsReview":0,"message":"No pending bookings for this date."} |
-| 45 | PATCH /api/admin/config saves hotelName + frontdeskEmail | PASS | {"key":"singleton","frontdeskPhone":"+1 (555) 111-2222","hotelName":"Lakeside Grand Hotel","frontdeskEmail":"frontdesk@lakesidegrand.test","_id":"e6f21e9434de39a95b73c9be"} |
+| 45 | PATCH /api/admin/config saves hotelName + frontdeskEmail | PASS | {"key":"singleton","frontdeskPhone":"+1 (555) 111-2222","hotelName":"Lakeside Grand Hotel","frontdeskEmail":"frontdesk@lakesidegrand.test","_id":"c8edbabc7303ec7e92a2a967"} |
 | 46 | Allocation email includes hotel name, logo, big time wedge, 15-min reminder, phone, email, Request Changes button, rooms, safe travels | PASS | {"hotelName":true,"bigTime":true,"lobbyReminder":true,"phone":true,"email":true,"safeTravels":true,"logo":true,"requestChangesButton":true,"rooms":true} |
