@@ -9,7 +9,7 @@ const STATUSES = [
   "ALLOCATED",        // assigned a slot by the algorithm/front desk, email sent, awaiting guest response
   "CONFIRMED",        // guest accepted (or picked a slot themselves during a change request)
   "REJECTED",         // guest rejected, no further action
-  "CHANGE_REQUESTED", // guest asked to change, currently picking a new slot
+  "CHANGE_REQUESTED", // guest asked for a different time; front desk must approve or reject it
   "NEEDS_REVIEW"      // could not be auto-allocated, or no alternate slot was available - front desk must handle manually
 ];
 
@@ -36,6 +36,10 @@ const bookingSchema = new mongoose.Schema(
 
     status: { type: String, enum: STATUSES, default: "PENDING" },
     assignedSlot: { type: String, default: null },
+
+    // Set when a guest requests a different time. assignedSlot is left untouched (it's their
+    // current/previous confirmed slot) until front desk approves or rejects the request.
+    requestedSlot: { type: String, default: null },
 
     reviewNote: { type: String, default: "" },
     respondToken: { type: String, default: () => crypto.randomBytes(20).toString("hex"), unique: true },

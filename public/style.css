@@ -83,3 +83,35 @@ th { background: #f0f3f7; }
 .muted { color: #888; font-size: 13px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 @media (max-width: 700px) { .grid-2 { grid-template-columns: 1fr; } }
+
+/* In-page tab bar (JS-driven, not links) */
+.tabbar { display: flex; gap: 6px; margin-bottom: 18px; flex-wrap: wrap; border-bottom: 1px solid #e2e6ea; }
+.tabbtn {
+  padding: 10px 16px; border: none; background: none; cursor: pointer;
+  font-size: 14px; font-weight: 600; color: #667; border-bottom: 2.5px solid transparent;
+}
+.tabbtn.active { color: #0b5fa5; border-bottom-color: #0b5fa5; }
+
+/* Traffic-light slot status cards */
+.slot-status { border-radius: 10px; padding: 10px 12px; cursor: pointer; border: 1.5px solid transparent; }
+.slot-status.green { background: #e5f6ea; border-color: #bfe6cb; }
+.slot-status.yellow { background: #fff6d9; border-color: #f2e0a0; }
+.slot-status.red { background: #fbe3e1; border-color: #f0bcb8; }
+.slot-status .row { display: flex; justify-content: space-between; align-items: center; }
+.slot-status .count { font-size: 12px; font-weight: 700; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+.dot.green { background: #2f9e52; }
+.dot.yellow { background: #c99a0a; }
+.dot.red { background: #c0392b; }
+
+/* Request list rows with select checkbox */
+.req-row { display: flex; align-items: flex-start; gap: 10px; }
+.req-row input[type="checkbox"] { width: auto; margin-top: 4px; }
+.req-row .req-body { flex: 1; }
+
+.bulkbar {
+  position: sticky; bottom: 0; background: #10233d; color: #fff; border-radius: 10px;
+  padding: 12px 16px; margin-top: 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+}
+.bulkbar select { width: auto; }
+.bulkbar .muted { color: #b7c3d1; }

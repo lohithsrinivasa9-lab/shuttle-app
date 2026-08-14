@@ -40,7 +40,15 @@ function render(booking) {
     content.innerHTML = statusBlock + `<p>This request has been cancelled. No further action needed.</p>`;
     return;
   }
-  if (booking.status !== "ALLOCATED" && booking.status !== "CHANGE_REQUESTED") {
+  if (booking.status === "CHANGE_REQUESTED") {
+    content.innerHTML = statusBlock + `
+      <p>${booking.requestedSlotLabel
+        ? `We've received your request to move to <b>${booking.requestedSlotLabel}</b>.`
+        : `We've received your request for a different time.`}
+      The front desk is reviewing it and you'll get an email once it's decided.</p>`;
+    return;
+  }
+  if (booking.status !== "ALLOCATED") {
     content.innerHTML = statusBlock + `<p>We haven't scheduled a time yet - check back soon or call the front desk.</p>`;
     return;
   }

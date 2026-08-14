@@ -25,6 +25,48 @@ function formatSlotLabel(slotTime) {
   return `${hour12}:${String(m).padStart(2, "0")} ${period}`;
 }
 
+// "YYYY-MM-DD" in local time (avoids the UTC-shift bug you get from toISOString()).
+function formatLocalDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+// The shuttle "day" runs 7:00 AM - 10:00 PM, with nothing scheduled overnight, so the
+// dashboard's "Today" view rolls over at 7:00 AM rather than midnight. Before 7 AM, "today"
+// is still treated as the previous calendar date. Uses the server's local timezone - set the
+// TZ environment variable to the hotel's timezone if the host's default differs.
+function getOperationalDate(now = new Date()) {
+  const d = new Date(now);
+  if (d.getHours() < 7) {
+    d.setDate(d.getDate() - 1);
+  }
+  return formatLocalDate(d);
+}
+
+function addDays(dateStr, n) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + n);
+  return formatLocalDate(dt);
+}
+
+function addMonths(dateStr, n) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setMonth(dt.getMonth() + n);
+  return formatLocalDate(dt);
+}
+
+// Traffic-light status for a slot as it fills up.
+function slotLevel(used, max, blocked) {
+  if (blocked) return "red";
+  if (used >= max) return "red";
+  if (used >= max * 0.5) return "yellow";
+  return "green";
+}
+
 module.exports = {
   MORNING,
   EVENING,
@@ -33,5 +75,10 @@ module.exports = {
   COMBINABLE_GROUP,
   destinationGroup,
   windowFor,
-  formatSlotLabel
+  formatSlotLabel,
+  formatLocalDate,
+  getOperationalDate,
+  addDays,
+  addMonths,
+  slotLevel
 };

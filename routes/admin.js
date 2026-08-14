@@ -6,21 +6,35 @@ const Booking = require("../models/Booking");
 const SlotOverride = require("../models/SlotOverride");
 const Config = require("../models/Config");
 const { getSlotState, allocateForDate } = require("../utils/allocate");
-const { ALL_SLOTS, MAX_PER_SLOT, windowFor, formatSlotLabel } = require("../utils/slots");
-const { sendAllocationEmail } = require("../utils/mailer");
+const { ALL_SLOTS, MAX_PER_SLOT, windowFor, formatSlotLabel, getOperationalDate, addDays, addMonths, slotLevel } = require("../utils/slots");
+const { sendAllocationEmail, sendChangeConfirmed, sendChangeRejected } = require("../utils/mailer");
 
-// Used by both the front desk and driver dashboards. There is no login in this version -
-// both roles can view, edit, and block slots. Only front desk triggers "send emails" from its UI.
+// Single shared dashboard for both front desk and driver - no login, no role split.
+// Everyone who has the link can view, edit, block, regroup, and send emails.
 
-// GET /api/admin/bookings?date=YYYY-MM-DD
+// GET /api/admin/today - the "operational date" (shuttle day rolls over at 7 AM, not midnight),
+// plus a couple of handy reference dates for the dashboard's Upcoming/History tabs.
+router.get("/today", (req, res) => {
+  const today = getOperationalDate();
+  res.json({
+    today,
+    previousDay: addDays(today, -1),
+    upcomingMax: addMonths(today, 4),
+    historyMin: addMonths(today, -4)
+  });
+});
+
+// GET /api/admin/bookings?date=YYYY-MM-DD&sort=asc|desc
 router.get("/bookings", async (req, res) => {
   const { date } = req.query;
   const filter = date ? { date } : {};
-  const bookings = await Booking.find(filter).sort({ createdAt: -1 }).lean();
+  const sortDir = req.query.sort === "desc" ? -1 : 1; // ascending (oldest request first) by default
+  const bookings = await Booking.find(filter).sort({ createdAt: sortDir }).lean();
   res.json({
     bookings: bookings.map((b) => ({
       ...b,
       assignedSlotLabel: b.assignedSlot ? formatSlotLabel(b.assignedSlot) : null,
+      requestedSlotLabel: b.requestedSlot ? formatSlotLabel(b.requestedSlot) : null,
       preferredSlotLabels: b.preferredSlots.map(formatSlotLabel)
     }))
   });
@@ -49,7 +63,77 @@ router.patch("/bookings/:id", async (req, res) => {
   }
 });
 
-// GET /api/admin/slots?date=YYYY-MM-DD  - full grid for the day
+// POST /api/admin/bookings/bulk-assign  { ids: [...], slotTime, sendEmail }
+// Front desk/driver regroup a batch of requests into one time slot and (optionally) email
+// everyone their new time in one action.
+router.post("/bookings/bulk-assign", async (req, res) => {
+  try {
+    const { ids, slotTime, sendEmail } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: "ids is required" });
+    if (!slotTime || !ALL_SLOTS.includes(slotTime)) return res.status(400).json({ error: "Invalid slot" });
+
+    let updated = 0;
+    let emailed = 0;
+    for (const id of ids) {
+      const booking = await Booking.findById(id);
+      if (!booking) continue;
+      booking.assignedSlot = slotTime;
+      booking.requestedSlot = null;
+      if (booking.status === "PENDING" || booking.status === "NEEDS_REVIEW" || booking.status === "CHANGE_REQUESTED") {
+        booking.status = "ALLOCATED";
+      }
+      await booking.save();
+      updated++;
+      if (sendEmail) {
+        await sendAllocationEmail(booking);
+        booking.allocationEmailSentAt = new Date();
+        await booking.save();
+        emailed++;
+      }
+    }
+    res.json({ ok: true, updated, emailed });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// POST /api/admin/bookings/:id/approve-change - move the guest to the slot they requested
+router.post("/bookings/:id/approve-change", async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ error: "Not found" });
+    if (!booking.requestedSlot) return res.status(400).json({ error: "This booking has no pending change request." });
+
+    booking.assignedSlot = booking.requestedSlot;
+    booking.requestedSlot = null;
+    booking.status = "CONFIRMED";
+    await booking.save();
+    sendChangeConfirmed(booking).catch((e) => console.error("email error:", e.message));
+    res.json({ ok: true, booking });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// POST /api/admin/bookings/:id/reject-change - guest goes back to their previously assigned slot
+router.post("/bookings/:id/reject-change", async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ error: "Not found" });
+
+    booking.requestedSlot = null;
+    booking.status = booking.assignedSlot ? "CONFIRMED" : "NEEDS_REVIEW";
+    await booking.save();
+    if (booking.assignedSlot) {
+      sendChangeRejected(booking).catch((e) => console.error("email error:", e.message));
+    }
+    res.json({ ok: true, booking });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// GET /api/admin/slots?date=YYYY-MM-DD  - full grid for the day, color-coded as it fills
 router.get("/slots", async (req, res) => {
   const { date } = req.query;
   if (!date) return res.status(400).json({ error: "date is required" });
@@ -66,7 +150,8 @@ router.get("/slots", async (req, res) => {
       used: s.used,
       max: MAX_PER_SLOT,
       remaining: MAX_PER_SLOT - s.used,
-      bookingCount: s.bookings.length
+      bookingCount: s.bookings.length,
+      level: slotLevel(s.used, MAX_PER_SLOT, s.blocked) // "green" | "yellow" | "red"
     };
   });
   res.json({ slots });
@@ -134,11 +219,15 @@ router.get("/config", async (req, res) => {
   res.json({ config });
 });
 
-// PATCH /api/admin/config  { frontdeskPhone }
+// PATCH /api/admin/config  { hotelName?, frontdeskPhone?, frontdeskEmail? }
 router.patch("/config", async (req, res) => {
+  const updates = {};
+  for (const field of ["hotelName", "frontdeskPhone", "frontdeskEmail"]) {
+    if (req.body[field] !== undefined) updates[field] = req.body[field];
+  }
   const config = await Config.findOneAndUpdate(
     { key: "singleton" },
-    { $set: { frontdeskPhone: req.body.frontdeskPhone } },
+    { $set: updates },
     { upsert: true, new: true }
   );
   res.json({ ok: true, config });

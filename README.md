@@ -9,26 +9,33 @@ Connects guests, front desk, and drivers around a shared shuttle schedule (7:00 
   Train Station may share a slot as long as their combined total stays at or under 20; every other
   destination gets an exclusive slot.
 - Guests get an email once a slot is assigned, with buttons to accept, reject, or request a
-  different time.
-- Front desk and driver each get a dashboard (`/frontdesk.html`, `/driver.html`) to view all
-  bookings, edit/reassign slots, block slots they can't run, and (front desk only) trigger
-  allocation and send confirmation emails. No login is required for either dashboard in this
-  version - keep those URLs off the public QR code.
+  different time. Requesting a change no longer auto-confirms - it goes to front desk for
+  approval, and the guest is emailed either way (approved into the new time, or kept at their
+  original time if rejected).
+- Front desk and driver share a single dashboard and a single link (`/dashboard.html`) - no login,
+  no role split. It has five tabs: **Today** (resets automatically at 7:00 AM, the start of the
+  shuttle day), **Previous Day**, **Upcoming** (any future date up to 4 months out), **History**
+  (past dates), and **Settings** (hotel name, front desk phone/email, QR code). Slots are
+  color-coded green/yellow/red as they fill, and staff can multi-select requests and regroup them
+  into a time slot in one action, which emails everyone in the batch.
 
 ## Project layout
 
 ```
 server.js            Express app entry point
 config/db.js          MongoDB connection
-models/               Booking, SlotOverride (blocked slots), Config (front desk phone)
-utils/slots.js         Fixed daily timetable + destination grouping rules
+models/               Booking, SlotOverride (blocked slots), Config (hotel name/phone/email)
+utils/slots.js         Fixed daily timetable, destination grouping, 7 AM day-rollover, slot colors
 utils/allocate.js      The clustering/allocation algorithm
 utils/mailer.js        Gmail SMTP + email templates
 routes/booking.js       Guest-facing booking API
 routes/respond.js       Accept / reject / request-change API (used by the emailed link)
-routes/admin.js         Front desk & driver dashboard API
-public/                HTML/CSS/JS for book.html, respond.html, frontdesk.html, driver.html
+routes/admin.js         Shared front desk + driver dashboard API
+public/                HTML/CSS/JS for book.html, respond.html, dashboard.html
 ```
+
+`frontdesk.html` and `driver.html` still exist as redirect stubs to `dashboard.html`, in case
+either link was already saved or bookmarked somewhere.
 
 ## 1. Run it locally first
 
@@ -38,10 +45,11 @@ You'll need [Node.js 18+](https://nodejs.org).
 2. `npm install`
 3. Copy `.env.example` to `.env` and fill in `MONGODB_URI` (see step 2 below). You can leave
    `GMAIL_USER`/`GMAIL_APP_PASSWORD` blank for now - emails will just print to the terminal
-   instead of sending.
+   instead of sending. Optionally set `TZ` to the hotel's timezone (e.g. `America/New_York`) so
+   the 7 AM day-rollover lines up with local time on the host.
 4. `npm start`
-5. Open `http://localhost:3000/book.html` (guest form), `http://localhost:3000/frontdesk.html`,
-   and `http://localhost:3000/driver.html`.
+5. Open `http://localhost:3000/book.html` (guest form) and
+   `http://localhost:3000/dashboard.html` (shared front desk / driver dashboard).
 
 ## 2. Free database: MongoDB Atlas (permanent free tier)
 
@@ -85,9 +93,10 @@ wake back up on the next request - fine for an internal booking tool.
    - **Start Command**: `npm start`
    - **Instance Type**: Free
 4. Under **Environment Variables**, add: `MONGODB_URI`, `GMAIL_USER`, `GMAIL_APP_PASSWORD`,
-   `FRONTDESK_PHONE`, and `BASE_URL` (set this to the Render URL you're given, e.g.
+   `FRONTDESK_PHONE`, `BASE_URL` (set this to the Render URL you're given, e.g.
    `https://your-app-name.onrender.com` - you can update it after the first deploy once you know
-   the final URL).
+   the final URL), and optionally `HOTEL_NAME`, `FRONTDESK_EMAIL`, and `TZ`. Hotel name and front
+   desk phone/email can also be edited later from the dashboard's Settings tab without redeploying.
 5. Click **Create Web Service**. After it builds, your app is live at
    `https://your-app-name.onrender.com`.
 6. Update the `BASE_URL` environment variable to match that exact URL and redeploy (this is what
@@ -97,7 +106,7 @@ wake back up on the next request - fine for an internal booking tool.
 
 You don't need a separate QR tool - it's built in:
 
-1. Open `https://your-app-name.onrender.com/frontdesk.html`.
+1. Open `https://your-app-name.onrender.com/dashboard.html` -> **Settings** tab.
 2. Scroll to **Guest Booking QR Code** and click **Generate QR Code**.
 3. It encodes `https://your-app-name.onrender.com/book.html`. Screenshot or right-click-save the
    image and print it for the front desk / guest rooms.
@@ -117,18 +126,27 @@ whenever new requests come in):
 4. Anyone who still doesn't fit after all 3 rounds is marked **Needs Review** for front desk to
    place manually (e.g. by opening an extra slot or contacting the guest).
 5. Click **Send Allocation Emails** to email everyone their assigned time with accept/reject/
-   change-time links. Rejecting takes no further action; requesting a change shows the guest all
-   currently-open compatible slots to pick from themselves.
+   change-time links.
 
-Front desk and driver can block any slot at any time (e.g. driver unavailable, vehicle in for
-service) from either dashboard - blocked slots are skipped by the allocation algorithm and hidden
-as options in guest emails.
+Rejecting a slot outright takes no further action. Requesting a change shows the guest all
+currently-open compatible slots, but picking one no longer auto-confirms - it flags the booking as
+**Change Requested** on the dashboard. From there, staff either **Approve** it (moves the guest to
+their requested slot and emails them the new time) or **Reject** it (the guest's original slot is
+left untouched, and they're emailed that their time stands). Staff can also multi-select any set
+of requests on the Today/Previous Day/Upcoming/History tabs and regroup them into a slot in one
+action ("Assign & Email"), which is the quickest way to build out a day's schedule by hand instead
+of relying only on the automatic algorithm.
+
+Slots are color-coded on the dashboard as they fill: green (under half full), yellow (half to
+full), red (full or blocked). Staff can block any slot at any time (e.g. driver unavailable,
+vehicle in for service) by clicking it - blocked slots are skipped by the allocation algorithm and
+hidden as options in guest emails.
 
 ## Notes / things to double check before go-live
 
-- No login is used for `/frontdesk.html` or `/driver.html` in this version - anyone with the link
-  can view/edit bookings. Don't put those links on public signage; only share `/book.html` (or the
-  QR code) with guests. Ask if you'd like a simple password added later.
+- No login is used for `/dashboard.html` in this version - anyone with the link can view/edit
+  bookings. Don't put that link on public signage; only share `/book.html` (or the QR code) with
+  guests. Ask if you'd like a simple password added later.
 - Pickup vs. drop-off is currently just a label saved on each booking for the driver's reference;
   the seat-count/slot-sharing rule is enforced at the destination level, not per direction.
 - Gmail's free tier is meant for low-volume sending; if you expect very high booking volume,

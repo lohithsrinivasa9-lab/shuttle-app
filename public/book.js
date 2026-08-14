@@ -1,7 +1,11 @@
 const dateInput = document.getElementById("date");
 const today = new Date();
-dateInput.value = today.toISOString().slice(0, 10);
-dateInput.min = today.toISOString().slice(0, 10);
+const fourMonthsOut = new Date(today);
+fourMonthsOut.setMonth(fourMonthsOut.getMonth() + 4);
+const toLocalDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+dateInput.value = toLocalDateStr(today);
+dateInput.min = toLocalDateStr(today);
+dateInput.max = toLocalDateStr(fourMonthsOut);
 
 let selectedSlots = []; // ordered array of slot times, preference order
 let slotsData = [];

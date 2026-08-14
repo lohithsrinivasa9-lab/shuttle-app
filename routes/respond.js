@@ -3,7 +3,6 @@ const router = express.Router();
 const Booking = require("../models/Booking");
 const { getSlotState, openSlotsFor } = require("../utils/allocate");
 const { formatSlotLabel } = require("../utils/slots");
-const { sendChangeConfirmed } = require("../utils/mailer");
 
 // GET /api/respond/:token  -> booking details for the guest response page
 router.get("/:token", async (req, res) => {
@@ -18,6 +17,8 @@ router.get("/:token", async (req, res) => {
       partySize: booking.partySize,
       assignedSlot: booking.assignedSlot,
       assignedSlotLabel: booking.assignedSlot ? formatSlotLabel(booking.assignedSlot) : null,
+      requestedSlot: booking.requestedSlot,
+      requestedSlotLabel: booking.requestedSlot ? formatSlotLabel(booking.requestedSlot) : null,
       status: booking.status
     }
   });
@@ -60,24 +61,26 @@ router.post("/:token", async (req, res) => {
     }
 
     if (action === "change") {
+      // Requesting a change no longer confirms anything on the spot - it just flags the
+      // booking for front desk to approve or reject. assignedSlot is left untouched so
+      // front desk can revert to it if they reject the request.
       if (!newSlot) {
         booking.status = "CHANGE_REQUESTED";
+        booking.requestedSlot = null;
         await booking.save();
         return res.json({ ok: true, status: booking.status, needsSelection: true });
       }
 
-      // Guest picked a specific alternative slot - confirm it if there's still room.
       const state = await getSlotState(booking.date);
       const open = openSlotsFor(state, booking.destination, booking.partySize);
       if (!open.includes(newSlot)) {
         return res.status(409).json({ error: "That slot just filled up. Please pick another." });
       }
 
-      booking.assignedSlot = newSlot;
-      booking.status = "CONFIRMED";
+      booking.status = "CHANGE_REQUESTED";
+      booking.requestedSlot = newSlot;
       await booking.save();
-      sendChangeConfirmed(booking).catch((e) => console.error("email error:", e.message));
-      return res.json({ ok: true, status: booking.status, assignedSlot: booking.assignedSlot });
+      return res.json({ ok: true, status: booking.status, requestedSlot: booking.requestedSlot, pendingApproval: true });
     }
 
     return res.status(400).json({ error: "Unknown action" });

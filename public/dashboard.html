@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Shuttle Dashboard</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="container wide">
+  <h1 id="page-title">🚐 Shuttle Dashboard</h1>
+  <p class="subtitle">Shared by front desk and driver - view requests, manage slots, and send guests their times.</p>
+
+  <div class="tabbar" id="tabbar">
+    <button class="tabbtn" data-tab="today">Today</button>
+    <button class="tabbtn" data-tab="previous">Previous Day</button>
+    <button class="tabbtn" data-tab="upcoming">Upcoming</button>
+    <button class="tabbtn" data-tab="history">History</button>
+    <button class="tabbtn" data-tab="settings">Settings</button>
+  </div>
+
+  <div id="banner"></div>
+  <div id="app"></div>
+</div>
+<script src="dashboard.js"></script>
+</body>
+</html>
