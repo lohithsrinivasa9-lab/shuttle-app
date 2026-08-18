@@ -67,6 +67,19 @@ function slotLevel(used, max, blocked) {
   return "green";
 }
 
+// The actual Date a given "YYYY-MM-DD" + "HH:MM" slot represents, in local time.
+function slotDateTime(dateStr, slotTime) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const [h, mi] = slotTime.split(":").map(Number);
+  return new Date(y, m - 1, d, h, mi);
+}
+
+// True once a slot's departure time has arrived or passed. No buffer beyond "already started" -
+// a slot 1 minute in the future is still bookable.
+function isSlotPast(dateStr, slotTime, now = new Date()) {
+  return slotDateTime(dateStr, slotTime).getTime() <= now.getTime();
+}
+
 module.exports = {
   MORNING,
   EVENING,
@@ -80,5 +93,7 @@ module.exports = {
   getOperationalDate,
   addDays,
   addMonths,
-  slotLevel
+  slotLevel,
+  slotDateTime,
+  isSlotPast
 };

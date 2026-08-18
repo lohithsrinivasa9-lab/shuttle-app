@@ -4,14 +4,38 @@ const Config = require("../models/Config");
 
 const DEST_LABEL = { AIRPORT: "Airport", STADIUM: "Stadium", FERRY: "Ferry Terminal", TRAIN: "Train Station" };
 
+// One pooled connection, reused for every send, instead of opening a fresh SMTP connection per
+// email. Rebuilt if credentials change (rare, but happens right after adding them via env vars).
+let transporter = null;
+let transporterKey = null;
 function getTransporter() {
-  return nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_APP_PASSWORD
-    }
-  });
+  const key = `${process.env.GMAIL_USER}:${process.env.GMAIL_APP_PASSWORD}`;
+  if (!transporter || transporterKey !== key) {
+    transporter = nodemailer.createTransport({
+      service: "gmail",
+      pool: true,
+      maxConnections: 1,
+      maxMessages: 100,
+      auth: {
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_APP_PASSWORD
+      }
+    });
+    transporterKey = key;
+  }
+  return transporter;
+}
+
+// Serializes every outbound send through one queue. Without this, a guest submitting a few
+// bookings back to back (or front desk bulk-emailing a group) fires several concurrent SMTP
+// sends at once, which can race or get throttled by Gmail - sometimes silently dropping a send
+// that only ever gets logged to a server console nobody's watching. Queueing means each send
+// waits its turn; one failure doesn't block the ones behind it.
+let sendQueue = Promise.resolve();
+function enqueueSend(task) {
+  const run = sendQueue.then(task, task);
+  sendQueue = run.catch(() => {});
+  return run;
 }
 
 async function getBrand() {
@@ -34,13 +58,14 @@ async function sendMail({ to, subject, html, fromName }) {
     console.log(`To: ${to}\nSubject: ${subject}\n${html}\n`);
     return { skipped: true };
   }
-  const transporter = getTransporter();
-  return transporter.sendMail({
-    from: `"${fromName || "Hotel Shuttle"}" <${process.env.GMAIL_USER}>`,
-    to,
-    subject,
-    html
-  });
+  return enqueueSend(() =>
+    getTransporter().sendMail({
+      from: `"${fromName || "Hotel Shuttle"}" <${process.env.GMAIL_USER}>`,
+      to,
+      subject,
+      html
+    })
+  );
 }
 
 // Placeholder logo - swap /public/email-assets/logo.png for the real hotel logo whenever it's
@@ -116,13 +141,16 @@ async function sendAllocationEmail(booking) {
   return sendMail({ to: booking.email, subject: `Your shuttle time is scheduled - ${formatSlotLabel(booking.assignedSlot)}`, html, fromName: brand.hotelName });
 }
 
-// Sent when front desk approves a guest's request to move to a different time.
-async function sendChangeConfirmed(booking) {
+// Sent when front desk approves a guest's own change request, OR when front desk moves an
+// already-assigned/confirmed guest to a different time on their own initiative (in which case a
+// reason is required and included here so the guest knows why their time changed).
+async function sendChangeConfirmed(booking, reason) {
   const brand = await getBrand();
   const html = wrap(brand.hotelName, `
     <p>Hi ${booking.name},</p>
     <p>Your shuttle time for <b>${directionLine(booking)}</b> on <b>${booking.date}</b> has been updated to:</p>
     ${timeWedge(booking.assignedSlot)}
+    ${reason ? `<p><b>Reason for the change:</b> ${reason}</p>` : ""}
     <p>Please be in the lobby at least <b>15 minutes before</b> your departure time.</p>
   `, brand);
   return sendMail({ to: booking.email, subject: `Your new shuttle time is confirmed - ${formatSlotLabel(booking.assignedSlot)}`, html, fromName: brand.hotelName });

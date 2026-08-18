@@ -13,25 +13,40 @@
 
   <div id="banner"></div>
   <div id="form-wrap">
-    <form id="booking-form">
+    <form id="booking-form" autocomplete="off">
       <label>Full name</label>
-      <input type="text" id="name" required />
+      <input type="text" id="name" required autocomplete="off" />
+      <div class="muted error-text" id="name-error"></div>
 
-      <label>Room number(s)</label>
-      <div class="muted">Traveling from more than one room? Add each one.</div>
-      <div id="room-list"></div>
-      <div class="btn-row" style="margin-top:8px;">
-        <button type="button" class="btn secondary small" id="add-room-btn">+ Add another room</button>
+      <label>Direction</label>
+      <select id="direction" required>
+        <option value="DROPOFF">Hotel &rarr; Destination (drop-off)</option>
+        <option value="PICKUP">Destination &rarr; Hotel (pick-up)</option>
+      </select>
+
+      <div id="room-section">
+        <label>Room number(s)</label>
+        <div class="muted">Traveling from more than one room? Add each one.</div>
+        <div id="room-list"></div>
+        <div class="btn-row" style="margin-top:8px;">
+          <button type="button" class="btn secondary small" id="add-room-btn">+ Add another room</button>
+        </div>
       </div>
+      <p class="muted" id="room-not-needed" style="display:none;">Room number isn't needed for pick-up trips.</p>
 
       <label>Number of people travelling</label>
       <input type="number" id="partySize" min="1" max="20" value="1" required />
 
       <label>Email (for your confirmation)</label>
-      <input type="email" id="email" required />
+      <input type="email" id="email" required autocomplete="off" />
+      <div class="muted error-text" id="email-error"></div>
 
       <label>Phone number</label>
-      <input type="tel" id="phone" required />
+      <div style="display:flex; gap:8px;">
+        <select id="phone-dial" style="flex:0 0 auto; width:auto;"></select>
+        <input type="tel" id="phone-number" inputmode="numeric" placeholder="Digits only" required style="flex:1;" autocomplete="off" />
+      </div>
+      <div class="muted error-text" id="phone-error"></div>
 
       <label>Destination</label>
       <select id="destination" required>
@@ -41,19 +56,29 @@
         <option value="TRAIN">Train Station</option>
       </select>
 
-      <label>Direction</label>
-      <select id="direction" required>
-        <option value="DROPOFF">Hotel &rarr; Destination (drop-off)</option>
-        <option value="PICKUP">Destination &rarr; Hotel (pick-up)</option>
-      </select>
-
       <label>Travel date</label>
-      <input type="date" id="date" required />
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input type="date" id="date" required autocomplete="off" style="flex:1;" />
+        <button type="button" class="btn secondary small" id="reset-date-btn">Reset to today</button>
+      </div>
       <div class="muted">Defaults to today - you can book up to 4 months ahead.</div>
 
       <Title>Preferred time slots (pick 2 or 3, in order of preference)</Title>
       <div class="muted" id="slot-help">Tap up to 3 slots. First tap = 1st choice.</div>
       <div id="slot-container"></div>
+      <div class="muted error-text" id="slot-count-msg"></div>
+
+      <label style="display:flex; align-items:center; gap:8px; font-weight:600;">
+        <input type="checkbox" id="wheelchair" style="width:auto;" />
+        Requires wheelchair-accessible vehicle
+      </label>
+      <div id="accessibility-note-wrap" style="display:none;">
+        <label>Accessibility notes (optional)</label>
+        <input type="text" id="accessibilityNote" placeholder="Anything the driver should know" />
+      </div>
+
+      <label>Anything else we should know? (optional)</label>
+      <textarea id="notes" rows="2" placeholder="Special requests, extra luggage, etc." style="width:100%; padding:10px 12px; border:1px solid #d0d5dc; border-radius:8px; font-size:15px; font-family:inherit;"></textarea>
 
       <div class="btn-row">
         <button type="submit" class="btn" id="submit-btn">Request Shuttle</button>

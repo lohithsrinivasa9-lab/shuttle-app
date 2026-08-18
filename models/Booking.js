@@ -23,7 +23,12 @@ const bookingSchema = new mongoose.Schema(
       type: [String], // one guest booking can cover multiple rooms traveling together
       required: true,
       validate: {
-        validator: (arr) => Array.isArray(arr) && arr.length >= 1 && arr.every((r) => String(r).trim().length > 0),
+        validator: function (arr) {
+          // Not required for pickup trips (destination -> hotel) - the guest may not have
+          // checked in / been assigned a room yet.
+          if (this.direction === "PICKUP") return true;
+          return Array.isArray(arr) && arr.length >= 1 && arr.every((r) => String(r).trim().length > 0);
+        },
         message: "Enter at least one room number"
       },
       set: (arr) => (Array.isArray(arr) ? arr.map((r) => String(r).trim()).filter(Boolean) : arr)
@@ -42,6 +47,10 @@ const bookingSchema = new mongoose.Schema(
       }
     },
 
+    notes: { type: String, default: "", trim: true },
+    wheelchairAccessible: { type: Boolean, default: false },
+    accessibilityNote: { type: String, default: "", trim: true },
+
     status: { type: String, enum: STATUSES, default: "PENDING" },
     assignedSlot: { type: String, default: null },
 
@@ -51,24 +60,28 @@ const bookingSchema = new mongoose.Schema(
 
     reviewNote: { type: String, default: "" },
     respondToken: { type: String, default: () => crypto.randomBytes(20).toString("hex"), unique: true },
-    allocationEmailSentAt: { type: Date, default: null }
+    allocationEmailSentAt: { type: Date, default: null },
+    bookingReceivedEmailSentAt: { type: Date, default: null }
   },
   { timestamps: true }
 );
 
 bookingSchema.index({ date: 1, assignedSlot: 1, status: 1 });
 
-// Backfill guard: bookings created before multi-room support was added don't have a valid
-// roomNumbers array. Mongoose re-validates the WHOLE document on every save (not just changed
+// Backfill guard: bookings created before multi-room support was added don't have a roomNumbers
+// field at all. Mongoose re-validates the WHOLE document on every save (not just changed
 // fields), so without this, any unrelated staff action on an old booking - approve, reject,
 // bulk-assign, manual edit - would fail with "roomNumbers: Enter at least one room number" even
 // though nothing about rooms was touched. This recovers the legacy single `roomNumber` value if
-// present, or falls back to a placeholder, so old bookings stay editable.
+// present, or falls back to a placeholder, so old bookings stay editable. Only fires when the
+// field is truly missing (undefined/null) - a deliberately empty array on a new pickup booking
+// is left alone, since that's a valid state now.
 bookingSchema.pre("validate", function (next) {
-  const hasValidRooms = Array.isArray(this.roomNumbers) && this.roomNumbers.some((r) => String(r).trim());
-  if (!hasValidRooms) {
+  if (this.roomNumbers === undefined || this.roomNumbers === null) {
     const legacy = this.get("roomNumber");
-    this.roomNumbers = legacy ? [String(legacy).trim()] : ["Not provided"];
+    if (legacy) this.roomNumbers = [String(legacy).trim()];
+    else if (this.direction === "PICKUP") this.roomNumbers = [];
+    else this.roomNumbers = ["Not provided"];
   }
   next();
 });

@@ -133,3 +133,13 @@ th { background: #f0f3f7; }
 .modal-box .field { margin: 10px 0; font-size: 14px; }
 .modal-box .field b { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: #888; font-weight: 700; margin-bottom: 2px; }
 .modal-close { float: right; }
+
+.error-text { color: #a12626; min-height: 16px; margin-top: 4px; }
+.slot-chip .rank { display: block; font-size: 11px; font-weight: 700; }
+.slot-chip.disabled .rank { color: #999; }
+
+.pill.flag { background: #eef1f5; color: #445; font-weight: 600; }
+
+.agenda-section { margin-bottom: 22px; }
+.agenda-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid #e2e6ea; }
+textarea { font-family: inherit; }

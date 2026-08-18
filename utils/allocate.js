@@ -149,4 +149,38 @@ async function allocateForDate(date) {
   };
 }
 
-module.exports = { getSlotState, openSlotsFor, allocateForDate, ACTIVE_STATUSES };
+/**
+ * The single source of truth for "can this booking go into this slot right now?" - used by every
+ * path that assigns a slot (manual PATCH, bulk-assign, approve-change), not just the automatic
+ * algorithm and the guest's own self-service change request. Without this shared check, staff
+ * tools could put two conflicting destinations in the same slot even though the algorithm and
+ * guest-facing flow both forbid it.
+ */
+async function checkAssignable(date, booking, slotTime) {
+  const state = await getSlotState(date);
+  const s = state[slotTime];
+  if (!s) return { ok: false, error: "Invalid slot" };
+  if (s.blocked) return { ok: false, error: `That slot is blocked${s.blockReason ? ": " + s.blockReason : ""}.` };
+
+  const group = destinationGroup(booking.destination);
+  let used = s.used;
+  let slotGroup = s.group;
+
+  // If this booking already sits in this exact slot, back its own contribution out first so
+  // re-saving it into the same slot (or just growing party size) isn't blocked by itself.
+  if (booking.assignedSlot === slotTime) {
+    used -= booking.partySize;
+    if (s.bookings.length === 1 && String(s.bookings[0]._id) === String(booking._id)) slotGroup = null;
+  }
+
+  if (slotGroup && slotGroup !== group) {
+    const label = slotGroup === "AIRPORT_TRAIN" ? "the airport/train" : slotGroup.toLowerCase();
+    return { ok: false, error: `That time is already running to ${label}. Pick a slot not already claimed by a different destination.` };
+  }
+  if (MAX_PER_SLOT - used < booking.partySize) {
+    return { ok: false, error: "That slot doesn't have enough room for this party size." };
+  }
+  return { ok: true };
+}
+
+module.exports = { getSlotState, openSlotsFor, allocateForDate, checkAssignable, ACTIVE_STATUSES };

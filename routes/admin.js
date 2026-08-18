@@ -5,7 +5,7 @@ const QRCode = require("qrcode");
 const Booking = require("../models/Booking");
 const SlotOverride = require("../models/SlotOverride");
 const Config = require("../models/Config");
-const { getSlotState, allocateForDate } = require("../utils/allocate");
+const { getSlotState, allocateForDate, checkAssignable } = require("../utils/allocate");
 const { ALL_SLOTS, MAX_PER_SLOT, windowFor, formatSlotLabel, getOperationalDate, addDays, addMonths, slotLevel } = require("../utils/slots");
 const { sendAllocationEmail, sendChangeConfirmed, sendChangeRejected } = require("../utils/mailer");
 
@@ -27,9 +27,20 @@ router.get("/today", (req, res) => {
 });
 
 // GET /api/admin/bookings?date=YYYY-MM-DD&sort=asc|desc
+// or GET /api/admin/bookings?from=YYYY-MM-DD&to=YYYY-MM-DD&sort=asc|desc  (date range, for the
+// Upcoming/History agenda views - shows every reservation in the window in one call instead of
+// requiring front desk to page through one date at a time).
 router.get("/bookings", async (req, res) => {
-  const { date } = req.query;
-  const filter = date ? { date } : {};
+  const { date, from, to } = req.query;
+  let filter = {};
+  if (date) {
+    filter = { date };
+  } else if (from || to) {
+    const range = {};
+    if (from) range.$gte = from;
+    if (to) range.$lte = to;
+    filter = { date: range };
+  }
   const sortDir = req.query.sort === "desc" ? -1 : 1; // ascending (oldest request first) by default
   const bookings = await Booking.find(filter).sort({ createdAt: sortDir }).lean();
   res.json({
@@ -52,6 +63,10 @@ router.patch("/bookings/:id", async (req, res) => {
       if (req.body.assignedSlot && !ALL_SLOTS.includes(req.body.assignedSlot)) {
         return res.status(400).json({ error: "Invalid slot" });
       }
+      if (req.body.assignedSlot) {
+        const check = await checkAssignable(booking.date, booking, req.body.assignedSlot);
+        if (!check.ok) return res.status(409).json({ error: check.error });
+      }
       booking.assignedSlot = req.body.assignedSlot || null;
       if (booking.assignedSlot && booking.status === "PENDING") booking.status = "ALLOCATED";
     }
@@ -65,30 +80,56 @@ router.patch("/bookings/:id", async (req, res) => {
   }
 });
 
-// POST /api/admin/bookings/bulk-assign  { ids: [...], slotTime, sendEmail }
+// POST /api/admin/bookings/bulk-assign  { ids: [...], slotTime, sendEmail, reason? }
 // Front desk/driver regroup a batch of requests into one time slot and (optionally) email
-// everyone their new time in one action.
+// everyone their new time in one action. If any selected booking already has a
+// confirmed/allocated time different from the target slot, this counts as a CHANGE (not a
+// first-time assignment) and a reason is required - it's stored on the booking and included in
+// that guest's email so they know why their time moved.
 router.post("/bookings/bulk-assign", async (req, res) => {
   try {
-    const { ids, slotTime, sendEmail } = req.body;
+    const { ids, slotTime, sendEmail, reason } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: "ids is required" });
     if (!slotTime || !ALL_SLOTS.includes(slotTime)) return res.status(400).json({ error: "Invalid slot" });
+
+    const bookings = [];
+    for (const id of ids) {
+      const b = await Booking.findById(id);
+      if (b) bookings.push(b);
+    }
+
+    const isChangeFor = (b) => Boolean(b.assignedSlot) && b.assignedSlot !== slotTime && ["ALLOCATED", "CONFIRMED"].includes(b.status);
+    const changingCount = bookings.filter(isChangeFor).length;
+    if (changingCount > 0 && !(reason && reason.trim())) {
+      return res.status(400).json({
+        error: `${changingCount} of the selected guest(s) already have a confirmed time - a reason is required to change it.`,
+        needsReason: true
+      });
+    }
 
     let updated = 0;
     let emailed = 0;
     let emailSkipped = 0;
-    for (const id of ids) {
-      const booking = await Booking.findById(id);
-      if (!booking) continue;
+    let blocked = 0;
+    for (const booking of bookings) {
+      const check = await checkAssignable(booking.date, booking, slotTime);
+      if (!check.ok) {
+        blocked++;
+        continue;
+      }
+      const isChange = isChangeFor(booking);
       booking.assignedSlot = slotTime;
       booking.requestedSlot = null;
-      if (booking.status === "PENDING" || booking.status === "NEEDS_REVIEW" || booking.status === "CHANGE_REQUESTED") {
+      if (isChange) {
+        booking.reviewNote = reason.trim();
+        booking.status = "CONFIRMED";
+      } else if (booking.status === "PENDING" || booking.status === "NEEDS_REVIEW" || booking.status === "CHANGE_REQUESTED") {
         booking.status = "ALLOCATED";
       }
       await booking.save();
       updated++;
       if (sendEmail) {
-        const result = await sendAllocationEmail(booking);
+        const result = isChange ? await sendChangeConfirmed(booking, reason.trim()) : await sendAllocationEmail(booking);
         if (result && result.skipped) {
           emailSkipped++;
         } else {
@@ -98,7 +139,7 @@ router.post("/bookings/bulk-assign", async (req, res) => {
         }
       }
     }
-    res.json({ ok: true, updated, emailed, emailSkipped });
+    res.json({ ok: true, updated, emailed, emailSkipped, blocked });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -110,6 +151,9 @@ router.post("/bookings/:id/approve-change", async (req, res) => {
     const booking = await Booking.findById(req.params.id);
     if (!booking) return res.status(404).json({ error: "Not found" });
     if (!booking.requestedSlot) return res.status(400).json({ error: "This booking has no pending change request." });
+
+    const check = await checkAssignable(booking.date, booking, booking.requestedSlot);
+    if (!check.ok) return res.status(409).json({ error: check.error });
 
     booking.assignedSlot = booking.requestedSlot;
     booking.requestedSlot = null;
